@@ -5,8 +5,8 @@
 // FIXME(crutcher): We should be able to use IDE constants (D1, D2, etc).
 // But it seems the board-setup-selection is wrong in our env; so
 // instead we're redefining them for the Wemos D1
-const int BUTTON_LED_PIN = 5;
-const int BUTTON_PIN = 4;
+const int BUTTON_LED_PIN = 5; // D1
+const int BUTTON_PIN = 4;     // D2
 
 void setup() {
   Serial.begin(115200);
