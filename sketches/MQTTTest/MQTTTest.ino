@@ -7,7 +7,8 @@
 const char* ssid = "Greebo";
 const char* password = "monkeyshine42";
 
-char* topic = "esp8266_arduino_out";
+String topicPrefix;
+String stateTopic;
 char* server = "192.168.86.214";
 
 StaticJsonDocument<256> doc;
@@ -32,6 +33,7 @@ String macToStr(const uint8_t* mac)
   return result;
 }
 
+
 void setup() {
   Serial.begin(115200);
   delay(10);
@@ -53,30 +55,27 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   // Generate client name based on MAC address and last 8 bits of microsecond counter
-  String clientName;
-  clientName += "esp8266-";
   uint8_t mac[6];
   WiFi.macAddress(mac);
-  clientName += macToStr(mac);
-  clientName += "-";
-  clientName += String(micros() & 0xff, 16);
+  String macString = macToStr(mac);
+
+
+  String topicPrefix = "automatCell/" + macString;
 
   Serial.print("Connecting to ");
   Serial.print(server);
   Serial.print(" as ");
-  Serial.println(clientName);
+  Serial.println(topicPrefix);
+
+  String helloTopic = topicPrefix + "/hello";
+  stateTopic = topicPrefix + "/state";
   
-  if (client.connect((char*) clientName.c_str())) {
-    Serial.println("Connected to MQTT broker");
-    Serial.print("Topic is: ");
-    Serial.println(topic);
-    
-    if (client.publish(topic, "hello from ESP8266")) {
-      Serial.println("Publish ok");
-    }
-    else {
-      Serial.println("Publish failed");
-    }
+  if (client.connect((char*) topicPrefix.c_str())) {
+    if (client.publish(
+      (char*) helloTopic.c_str(),
+      "hello")) {
+        Serial.println("hello");
+      }
   }
   else {
     Serial.println("MQTT connect failed");
@@ -96,7 +95,7 @@ void loop() {
   
   if (client.connected()){
    
-    if (!client.publish(topic, outputBuffer)) {
+    if (!client.publish((char*) stateTopic.c_str(), outputBuffer)) {
       Serial.println("Publish failed");
     }
   }
