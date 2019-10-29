@@ -1,7 +1,8 @@
-
+#include <PubSubClient.h>
 #include <ESP8266WiFi.h>
+
 // Network SSID
-const char* ssid = "bubbles";
+const char* ssid = "Greebo";
 const char* password = "monkeyshine42";
  
 void setup() {
