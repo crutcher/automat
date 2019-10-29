@@ -1,5 +1,8 @@
 # Control file for pip-compile.
 
+ipython
+PyHamcrest
+
 pip-tools
 
 paho-mqtt
