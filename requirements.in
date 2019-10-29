@@ -1,0 +1,5 @@
+# Control file for pip-compile.
+
+pip-tools
+
+paho-mqtt
