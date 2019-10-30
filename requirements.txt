@@ -19,9 +19,10 @@ prompt-toolkit==2.0.10    # via ipython
 ptyprocess==0.6.0         # via pexpect
 pygments==2.4.2           # via ipython
 pyhamcrest==1.9.0
+pyserial==3.4
 six==1.12.0               # via pip-tools, prompt-toolkit, pyhamcrest, traitlets
 traitlets==4.3.3          # via ipython
 wcwidth==0.1.7            # via prompt-toolkit
 
 # The following packages are considered to be unsafe in a requirements file:
-# setuptools==41.5.1        # via ipython, pyhamcrest
+# setuptools==41.6.0        # via ipython, pyhamcrest

@@ -6,3 +6,6 @@ PyHamcrest
 pip-tools
 
 paho-mqtt
+
+# Support for Arduino-Makefile
+pyserial
