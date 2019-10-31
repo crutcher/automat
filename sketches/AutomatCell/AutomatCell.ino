@@ -1,10 +1,18 @@
+#include <FastLED.h>
+
+
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
-const char* ssid = "bubbles";
-const char* password = "monkeyshine42";
-const char* MQTT_BROKER = "192.168.43.131";
+//const char* ssid = "bubbles";
+//const char* password = "monkeyshine42";
+//const char* MQTT_BROKER = "192.168.43.131";
+
+const char* ssid = "_infinet";
+const char* password = "spaceship";
+const char* MQTT_BROKER = "10.133.10.98";
+
 const int MQTT_PORT = 1883;
 
 String AUTOMAT_CELL_ID;
@@ -16,10 +24,17 @@ String STATE_TOPIC;
 // FIXME(crutcher): We should be able to use IDE constants (D1, D2, etc).
 // But it seems the board-setup-selection is wrong in our env; so
 // instead we're redefining them for the Wemos D1
-const int BUTTON_LED_PIN = 5; // D1
-const int BUTTON_PIN = 2;     // D4
-const int DOOR_PIN = 4;       // D2
-const int DOOR_LATCH_PIN = 15;    // D8
+const int BUTTON_LED_PIN = 5;  // D1
+const int BUTTON_PIN = 2;      // D4
+const int DOOR_PIN = 4;        // D2
+const int DOOR_LATCH_PIN = 15; // D8
+const int LED_CLOCK_PIN = 13;   // D7
+const int LED_DATA_PIN = 12;  // D6
+
+#define NUM_LEDS 4
+
+CRGB leds[NUM_LEDS];
+
 
 String macToStr(const uint8_t* mac) {
   String result;
@@ -61,6 +76,9 @@ void maybeSendState() {
 void setup() {
   Serial.begin(115200);
   delay(10);
+
+  FastLED.addLeds<WS2801, LED_DATA_PIN, LED_CLOCK_PIN, RGB>(leds, NUM_LEDS);
+
 
   STATE_DOC[OPEN_FIELD] = false;
 
@@ -148,11 +166,23 @@ void loop() {
       markStateDirty();
     }
   }
-  
+
+  for (int i = 0; i < NUM_LEDS; ++i) {
+    if (buttonPressed()) {
+      if ((millis() / 200) % 2) {
+        leds[i] = CRGB::Red;
+      } else {
+        leds[i] = CRGB::Blue;
+      }
+    } else {
+      leds[i] = CRGB::White;  
+    }
+  }
+  FastLED.show();
+
+  renderButtonLed();
   if (!buttonPressed()) {
     digitalWrite(BUTTON_LED_PIN, doorOpened());
-  } else {
-    renderButtonLed();
   }
 
   maybeSendState();
