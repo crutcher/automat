@@ -1,19 +1,27 @@
+// Shutup FastLED pragma message:
+#define FASTLED_INTERNAL
 #include <FastLED.h>
-
 
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
-//const char* ssid = "bubbles";
-//const char* password = "monkeyshine42";
-//const char* MQTT_BROKER = "192.168.43.131";
+#ifndef WIFI_SSID
+#define WIFI_SSID "_infinet"
+#endif
 
-const char* ssid = "_infinet";
-const char* password = "spaceship";
-const char* MQTT_BROKER = "10.133.10.98";
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD "spaceship"
+#endif
 
-const int MQTT_PORT = 1883;
+#ifndef MQTT_BROKER
+#define MQTT_BROKER "10.133.10.98"
+#endif
+
+#ifndef MQTT_PORT
+#define MQTT_PORT 1883
+#endif
+
 
 String AUTOMAT_CELL_ID;
 String STATE_TOPIC;
@@ -21,22 +29,46 @@ String STATE_TOPIC;
 // PINS:
 // LED_BUILTIN
 
+#define PIN_A0 17
+#define PIN_D0 16
+#define PIN_D5 14
+#define PIN_D6 12
+#define PIN_D7 13
+#define PIN_D8 15
+
+#define PIN_TX 1
+#define PIN_RX 3
+#define PIN_D1 5
+#define PIN_D2 4
+#define PIN_D3 0
+#define PIN_D4 2
+
 // FIXME(crutcher): We should be able to use IDE constants (D1, D2, etc).
 // But it seems the board-setup-selection is wrong in our env; so
 // instead we're redefining them for the Wemos D1
-const int BUTTON_LED_PIN = 5;  // D1
-const int BUTTON_PIN = 2;      // D4
-const int DOOR_PIN = 4;        // D2
-const int DOOR_LATCH_PIN = 15; // D8
-const int LED_CLOCK_PIN = 13;   // D7
-const int LED_DATA_PIN = 12;  // D6
+const int BUTTON_LED_PIN = PIN_D1;
+const int BUTTON_PIN = PIN_D2;
+const int DOOR_PIN = PIN_A0;
+const int DOOR_LATCH_PIN = PIN_D8;
+
+const int LED_CLOCK_PIN = PIN_D4;
+const int LED_DATA_PIN = PIN_D3;
+
+const int VFD_DATA = PIN_D0;
+const int VFD_CLOCK = PIN_D5;
+const int VFD_LATCH = PIN_D6;
+const int VFD_OE = PIN_D7;
 
 #define NUM_LEDS 4
 
 CRGB leds[NUM_LEDS];
 
 
-String macToStr(const uint8_t* mac) {
+/**
+ * Format a binary MAC address as a hex string.
+ *
+ */
+String macToStr(const uint8_t mac[6]) {
   String result;
   for (int i = 0; i < 6; ++i) {
     result += String(mac[i], HEX);
@@ -77,15 +109,31 @@ void setup() {
   Serial.begin(115200);
   delay(10);
 
-  FastLED.addLeds<WS2801, LED_DATA_PIN, LED_CLOCK_PIN, RGB>(leds, NUM_LEDS);
+  Serial.println("");
+  Serial.print("A0");
+  Serial.println(PIN_A0);
+
+
 
 
   STATE_DOC[OPEN_FIELD] = false;
 
   pinMode(BUTTON_LED_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);  
-  pinMode(DOOR_PIN, INPUT_PULLUP);
+ // pinMode(DOOR_PIN, INPUT_PULLUP);
   pinMode(DOOR_LATCH_PIN, OUTPUT);
+
+  pinMode(VFD_DATA, OUTPUT);
+  pinMode(VFD_CLOCK, OUTPUT);
+  pinMode(VFD_LATCH, OUTPUT);
+  pinMode(VFD_OE, OUTPUT);
+
+  pinMode(PIN_RX, OUTPUT);
+
+  pinMode(LED_DATA_PIN, OUTPUT);
+  pinMode(LED_CLOCK_PIN, OUTPUT);
+
+  FastLED.addLeds<WS2801, LED_DATA_PIN, LED_CLOCK_PIN, RGB>(leds, NUM_LEDS);
 
   Serial.println("");
   Serial.println("setup");
@@ -93,9 +141,9 @@ void setup() {
   digitalWrite(BUTTON_LED_PIN, HIGH);
   {
     Serial.print("Connecting to ");
-    Serial.println(ssid);
+    Serial.println(WIFI_SSID);
   
-    WiFi.begin(ssid, password);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   
     while (WiFi.status() != WL_CONNECTED) {
       delay(100);
@@ -135,7 +183,7 @@ bool buttonPressed() {
 }
 
 bool doorOpened() {
-  return digitalRead(DOOR_PIN);
+  return analogRead(DOOR_PIN) > 800;
 }
 
 const long buttonAnimDelay = 100;
@@ -154,11 +202,33 @@ void renderButtonLed() {
     buttonAnimTimer = now;
   }
 
+  digitalWrite(PIN_RX, buttonAnimState);
+  
   digitalWrite(BUTTON_LED_PIN, buttonAnimState);
   digitalWrite(DOOR_LATCH_PIN, buttonAnimState);
+
 }
 
+int brightness = 0;
+long lastDigitMillis = 0;
+long DIGIT_DELAY = 800;
+
+CRGB kolor(22, 120, 50);
+
 void loop() {
+//  digitalWrite(VFD_OE, HIGH);
+  brightness = (brightness + 30) % 255;
+//  analogWrite(VFD_OE, brightness);
+  digitalWrite(VFD_OE, HIGH);
+
+  long now = millis();
+  if (now - lastDigitMillis > DIGIT_DELAY) {
+    lastDigitMillis = now;
+    digitalWrite(VFD_LATCH, LOW);
+    shiftOut(VFD_DATA, VFD_CLOCK, MSBFIRST, (millis() / 100) & 0xFF);
+    digitalWrite(VFD_LATCH, HIGH);
+  }
+
   {
     bool opened = doorOpened();
     if (STATE_DOC[OPEN_FIELD] != opened) {
@@ -175,7 +245,7 @@ void loop() {
         leds[i] = CRGB::Blue;
       }
     } else {
-      leds[i] = CRGB::White;  
+      leds[i] = kolor;
     }
   }
   FastLED.show();

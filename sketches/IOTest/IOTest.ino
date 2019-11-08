@@ -1,0 +1,82 @@
+/*
+  Blink
+
+  Turns an LED on for one second, then off for one second, repeatedly.
+
+  Most Arduinos have an on-board LED you can control. On the UNO, MEGA and ZERO
+  it is attached to digital pin 13, on MKR1000 on pin 6. LED_BUILTIN is set to
+  the correct LED pin independent of which board is used.
+  If you want to know what pin the on-board LED is connected to on your Arduino
+  model, check the Technical Specs of your board at:
+  https://www.arduino.cc/en/Main/Products
+
+  modified 8 May 2014
+  by Scott Fitzgerald
+  modified 2 Sep 2016
+  by Arturo Guadalupi
+  modified 8 Sep 2016
+  by Colby Newman
+
+  This example code is in the public domain.
+
+  http://www.arduino.cc/en/Tutorial/Blink
+*/
+
+#define PIN_D0 16
+#define PIN_D5 14
+#define PIN_D6 12
+#define PIN_D7 13
+#define PIN_D8 15
+
+#define PIN_TX 1
+#define PIN_RX 3
+#define PIN_D1 5
+#define PIN_D2 4
+#define PIN_D3 0
+#define PIN_D4 2
+
+
+// the setup function runs once when you press reset or power the board
+void setup() {
+
+  pinMode(PIN_D0, OUTPUT);
+  pinMode(PIN_D1, OUTPUT);
+  pinMode(PIN_D2, OUTPUT);
+  pinMode(PIN_D3, OUTPUT);
+  pinMode(PIN_D4, OUTPUT);
+  pinMode(PIN_D5, OUTPUT);
+  pinMode(PIN_D6, OUTPUT);
+  pinMode(PIN_D7, OUTPUT);
+  pinMode(PIN_D8, OUTPUT);
+  pinMode(PIN_TX, OUTPUT);
+  pinMode(PIN_RX, OUTPUT);
+}
+
+void blinkX(int pin, int count, long onTime, long offTime) {
+  digitalWrite(pin, LOW);
+  for (int i = 0; i < count; ++i) {
+    digitalWrite(pin, HIGH);
+    delay(onTime);
+    digitalWrite(pin, LOW);
+    delay(offTime);
+  }
+}
+
+// the loop function runs over and over again forever
+void loop() {
+  const int upTime = 50;
+  const int offTime = 20;
+
+  blinkX(PIN_D0, 9, upTime, offTime);
+  blinkX(PIN_D1, 1, upTime, offTime);
+  blinkX(PIN_D2, 2, upTime, offTime);
+  blinkX(PIN_D3, 3, upTime, offTime);
+  blinkX(PIN_D4, 4, upTime, offTime);
+  blinkX(PIN_D5, 5, upTime, offTime);
+  blinkX(PIN_D6, 6, upTime, offTime);
+  blinkX(PIN_D7, 7, upTime, offTime);
+  blinkX(PIN_D8, 8, upTime, offTime);
+
+  blinkX(PIN_TX, 10, upTime, offTime);
+  blinkX(PIN_RX, 11, upTime, offTime);
+}
