@@ -159,10 +159,19 @@ long DIGIT_DELAY = 800;
 
 CRGB kolor(22, 120, 50);
 
+
+int count = 0;
+
 void showVFDTubes() {
   digitalWrite(VFD_LATCH, LOW);
   for (int i = NUM_VFD_TUBES - 1; i >= 0; --i) {
-    shiftOut(VFD_DATA, VFD_CLOCK, MSBFIRST, VFD_TUBES[i] ^ VFD_XOR[i]);
+    byte val = VFD_TUBES[i] ^ VFD_XOR[i];
+    if (i == 2) {
+      if (count++ % 20) {
+        val = 0; 
+      }
+    }
+    shiftOut(VFD_DATA, VFD_CLOCK, MSBFIRST, val);
   }
   digitalWrite(VFD_LATCH, HIGH);
 }
@@ -178,6 +187,7 @@ int clamp(int val, int low, int high) {
 
 long lastFlicker = 0;
 bool flickerOn = false;
+
 
 void loop() {
   long now = millis();
