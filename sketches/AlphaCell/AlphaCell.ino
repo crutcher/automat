@@ -1,3 +1,5 @@
+#include <ArduinoOTA.h>
+
 // Shutup FastLED pragma message:
 #define FASTLED_INTERNAL
 #include <FastLED.h>
@@ -7,7 +9,8 @@
 #include <ArduinoJson.h>
 
 
-CRGB AUTOMAT_GREEN(22, 120, 50);
+CRGB AUTOMAT_GREEN(22, 164, 40);
+
 
 #ifndef WIFI_SSID
 #define WIFI_SSID "_infinet"
@@ -29,7 +32,8 @@ CRGB AUTOMAT_GREEN(22, 120, 50);
 const String AUTOMAT_ENVIRONMENT_TOPIC = "automat/environment";
 
 const String PHASE_KEY = "phase";
-const String POWER_KEY = "power";
+const String POWER_HIGH_KEY = "power_high";
+const String POWER_LOW_KEY = "power_low";
 const String GLITCH_KEY = "glitch";
 
 
@@ -84,6 +88,18 @@ void setLedColor(CRGB color) {
 
 
 /**
+ * Clamp a value between [low, high].
+ */
+int clamp(int val, int low, int high) {
+  if (val > high) {
+    return high;
+  } else if (val < low) {
+    return low;
+  }
+  return val;
+}
+
+/**
  * Format a binary MAC address as a hex string.
  *
  */
@@ -113,20 +129,85 @@ class PhaseTimer {
     }
 
     void update_phase(unsigned long remote_time) {
-      unsigned long local_time = phase_time();
+      unsigned long remote_offset = remote_time - millis();
+      
+      if (!_initialized) {
+        _initialized = true;
+        _offset = remote_offset;
 
-      long delta = remote_time - local_time;
+      } else {
+        unsigned int denom = _dwell_weight + _update_weight;
 
-      _offset += (_update_weight * delta) / (_dwell_weight + _update_weight);
+        // (a * old + b * new) / (a + b)
+        // (a * old / (a + b)) + (b * new / (a + b))
+
+        _offset = _dwell_weight * (_offset / denom) + _update_weight * (remote_offset / denom);
+      }
     }
        
   private:
+    unsigned int _initialized = false;
     unsigned int _dwell_weight;
     unsigned int _update_weight;
     unsigned long _offset;
 };
 
 PhaseTimer phase_timer(0, 4, 1);
+
+
+class CycleTimer {
+  public:
+    CycleTimer(long period_millis, PhaseTimer *phase_timer) {
+      _period_millis = period_millis;
+      _phase_timer = phase_timer;
+    }
+
+    long value() {
+      return _phase_timer->phase_time() % _period_millis;
+    }
+
+    uint8_t byteValue() {
+      return (256 * value()) / _period_millis;
+    }
+
+  private:
+    long _period_millis;
+    PhaseTimer *_phase_timer;
+};
+
+
+class CellPower {
+  public:
+    CellPower(
+        PhaseTimer *phase_timer,
+        uint8_t power_low,
+        uint8_t power_high) {
+      _phase_timer = phase_timer;
+      _heartbeat = new CycleTimer(6500, phase_timer);
+      _power_low = power_low;
+      _power_high = power_high;
+    }
+
+    void loop() {
+      _power = clamp(
+        cubicwave8(_heartbeat->byteValue()) + inoise8(_phase_timer->phase_time()) / 4 - 32,
+        0, 255);
+    }
+
+    uint8_t power() {
+      return _power;
+    }
+
+  private:
+    PhaseTimer *_phase_timer;
+    CycleTimer *_heartbeat;
+    
+    uint8_t _power_high;
+    uint8_t _power_low;
+    uint8_t _power;
+};
+
+CellPower cell_power(&phase_timer, 0, 255);
 
 
 StaticJsonDocument<256> MQTT_RECEIPT_DOC;
@@ -142,9 +223,14 @@ void onMqttMessage(char* topic, byte* payload, unsigned int payload_length) {
 
     // Zero-Copy Mode (modifies 'payload'):
     if (deserializeJson(MQTT_RECEIPT_DOC, payload) == DeserializationError::Ok) {
-      phase_timer.update_phase(MQTT_RECEIPT_DOC[PHASE_KEY]);
-      Serial.print("Phase: ");
-      Serial.println(phase_timer.phase_time());
+
+      if (MQTT_RECEIPT_DOC.getMember(PHASE_KEY)) {
+        phase_timer.update_phase(MQTT_RECEIPT_DOC[PHASE_KEY]);
+        Serial.print("Phase: ");
+        Serial.println(phase_timer.phase_time());
+      }
+
+      
     }
     
   } else if (!strcmp(topic, (char*) AUTOMAT_CONTROL_TOPIC.c_str())) {
@@ -246,9 +332,50 @@ void setup() {
   Serial.print("Subscribing to environment updates: ");
   Serial.println(AUTOMAT_CONTROL_TOPIC);
   mqttClient.subscribe((char*) AUTOMAT_CONTROL_TOPIC.c_str(), 1);
+
+
+  // ArduinoOTA
+  // Port defaults to 8266
+  // ArduinoOTA.setPort(8266);
+
+  // Hostname defaults to esp8266-[ChipID]
+  // ArduinoOTA.setHostname("myesp8266");
+
+  // No authentication by default
+  // ArduinoOTA.setPassword((const char *)"123");
+
+  ArduinoOTA.onStart([]() {
+    Serial.println("Start");
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nEnd");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+  ArduinoOTA.begin();
 }
   
 void loop() {
-  FastLED.show();
+  ArduinoOTA.handle();
   mqttClient.loop();
+
+  // POWER!
+  cell_power.loop();
+  FastLED.setBrightness(cell_power.power());
+  // wemosd1's analogWrite is 0-1024 (not 0-255).
+  // VFD_OE is active-low.
+  analogWrite(VFD_OE, 1024 - (cell_power.power() * 4));
+
+  setLedColor(AUTOMAT_GREEN);
+    
+  FastLED.show();
 }
