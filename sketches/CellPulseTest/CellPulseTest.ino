@@ -31,6 +31,8 @@ const int BUTTON_LED_PIN = PIN_D1;
 const int BUTTON_PIN = PIN_D2;
 const int DOOR_PIN = PIN_A0;
 const int DOOR_LATCH_PIN = PIN_D8;
+const int CELL_RESET = PIN_RX;
+
 
 const int LED_CLOCK_PIN = PIN_D4;
 const int LED_DATA_PIN = PIN_D3;
@@ -106,15 +108,16 @@ void setup() {
 
   pinMode(BUTTON_LED_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);  
- // pinMode(DOOR_PIN, INPUT_PULLUP);
+  pinMode(DOOR_PIN, INPUT);
   pinMode(DOOR_LATCH_PIN, OUTPUT);
+
+  pinMode(CELL_RESET, FUNCTION_3); 
+  pinMode(CELL_RESET, INPUT_PULLUP);
 
   pinMode(VFD_DATA, OUTPUT);
   pinMode(VFD_CLOCK, OUTPUT);
   pinMode(VFD_LATCH, OUTPUT);
   pinMode(VFD_OE, OUTPUT);
-
-  pinMode(PIN_RX, OUTPUT);
 
   pinMode(LED_DATA_PIN, OUTPUT);
   pinMode(LED_CLOCK_PIN, OUTPUT);
@@ -145,9 +148,7 @@ void renderButtonLed() {
     buttonAnimState = !buttonAnimState;
     buttonAnimTimer = now;
   }
-
-  digitalWrite(PIN_RX, buttonAnimState);
-  
+ 
   digitalWrite(BUTTON_LED_PIN, buttonAnimState);
   digitalWrite(DOOR_LATCH_PIN, buttonAnimState);
 
@@ -211,7 +212,7 @@ void loop() {
     }
   }
 
-  analogWrite(BUTTON_LED_PIN, brightness * 4);
+//  analogWrite(BUTTON_LED_PIN, brightness * 4);
 
   if (now - lastDigitMillis > DIGIT_DELAY) {
     Serial.print("brightness");
