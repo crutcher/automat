@@ -68,6 +68,8 @@ const int BUTTON_PIN = PIN_D2;
 const int DOOR_PIN = PIN_A0;
 const int DOOR_LATCH_PIN = PIN_D8;
 
+const int CELL_RESET_PIN = PIN_RX;
+
 const int LED_CLOCK_PIN = PIN_D4;
 const int LED_DATA_PIN = PIN_D3;
 
@@ -374,7 +376,7 @@ WiFiClient wifiClient;
 PubSubClient mqttClient(MQTT_BROKER, MQTT_PORT, onMqttMessage, wifiClient);
 
 bool buttonIsPressed() {
-  return not digitalRead(BUTTON_PIN);
+  return (not digitalRead(BUTTON_PIN)) || (not digitalRead(CELL_RESET_PIN));
 }
 
 bool doorIsOpen() {
@@ -383,10 +385,17 @@ bool doorIsOpen() {
 
 
 void setup() {
+  // Setup serial debugging.
+  Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY);
+  delay(10);
+  Serial.println("");
+  Serial.println("setup");
+
   pinMode(BUTTON_LED_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);  
  // pinMode(DOOR_PIN, INPUT_PULLUP);
   pinMode(DOOR_LATCH_PIN, OUTPUT);
+  pinMode(CELL_RESET_PIN, INPUT);
 
   pinMode(VFD_DATA, OUTPUT);
   pinMode(VFD_CLOCK, OUTPUT);
@@ -404,11 +413,6 @@ void setup() {
       LED_STRAND,
       LED_STRAND_SIZE);
 
-  // Setup serial debugging.
-  Serial.begin(115200);
-  delay(10);
-  Serial.println("");
-  Serial.println("setup");
 
   // Setup WiFi.
   Serial.print("Connecting to ");
