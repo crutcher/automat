@@ -1,3 +1,12 @@
+// Style:
+// ClassNames.methodNames()
+// ClassNames.member_names_
+// globalFunctions()
+// local_variables
+// g_global_variables
+// CONSTANT_VALUES
+
+
 #include <ArduinoOTA.h>
 
 // Shutup FastLED pragma message:
@@ -7,6 +16,42 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+
+
+// PINS:
+// LED_BUILTIN
+
+#define PIN_A0 17
+#define PIN_D0 16
+#define PIN_D5 14
+#define PIN_D6 12
+#define PIN_D7 13
+#define PIN_D8 15
+
+#define PIN_TX 1
+#define PIN_RX 3
+#define PIN_D1 5
+#define PIN_D2 4
+#define PIN_D3 0
+#define PIN_D4 2
+
+// FIXME(crutcher): We should be able to use IDE constants (D1, D2, etc).
+// But it seems the board-setup-selection is wrong in our env; so
+// instead we're redefining them for the Wemos D1
+const int FACE_BUTTON_LED_PIN = PIN_D1;
+const int FACE_BUTTON_PIN = PIN_D2;
+const int DOOR_SENSOR_PIN = PIN_A0;
+const int LATCH_SOLENOID_PIN = PIN_D8;
+
+const int REAR_BUTTON_PIN = PIN_RX;
+
+const int CELL_LIGHTS_CLOCK_PIN = PIN_D4;
+const int CELL_LIGHTS_DATA_PIN = PIN_D3;
+
+const int VFD_DATA_PIN = PIN_D0;
+const int VFD_CLOCK_PIN = PIN_D5;
+const int VFD_LATCH_PIN = PIN_D6;
+const int VFD_OE_PIN = PIN_D7;
 
 
 CRGB AUTOMAT_GREEN(22, 164, 40);
@@ -37,63 +82,32 @@ const String POWER_LOW_KEY = "power_low";
 const String GLITCH_KEY = "glitch";
 
 
-String AUTOMAT_CONTROL_TOPIC; // "automat/cell/{ID}/control"
+String g_cell_control_topic; // "automat/cell/{ID}/control"
+String g_automat_cell_id;
 
 
-String AUTOMAT_CELL_ID;
-String STATE_TOPIC;
 
-// PINS:
-// LED_BUILTIN
+#define g_fastled_values_size 4
 
-#define PIN_A0 17
-#define PIN_D0 16
-#define PIN_D5 14
-#define PIN_D6 12
-#define PIN_D7 13
-#define PIN_D8 15
-
-#define PIN_TX 1
-#define PIN_RX 3
-#define PIN_D1 5
-#define PIN_D2 4
-#define PIN_D3 0
-#define PIN_D4 2
-
-// FIXME(crutcher): We should be able to use IDE constants (D1, D2, etc).
-// But it seems the board-setup-selection is wrong in our env; so
-// instead we're redefining them for the Wemos D1
-const int BUTTON_LED_PIN = PIN_D1;
-const int BUTTON_PIN = PIN_D2;
-const int DOOR_PIN = PIN_A0;
-const int DOOR_LATCH_PIN = PIN_D8;
-
-const int CELL_RESET_PIN = PIN_RX;
-
-const int LED_CLOCK_PIN = PIN_D4;
-const int LED_DATA_PIN = PIN_D3;
-
-const int VFD_DATA = PIN_D0;
-const int VFD_CLOCK = PIN_D5;
-const int VFD_LATCH = PIN_D6;
-const int VFD_OE = PIN_D7;
-
-#define LED_STRAND_SIZE 4
-
-CRGB LED_STRAND[LED_STRAND_SIZE];
+CRGB g_fastled_values[g_fastled_values_size];
 
 void setLedColor(CRGB color) {
-  for (int i = 0; i < LED_STRAND_SIZE; ++i) {
-    LED_STRAND[i] = color;
+  for (int i = 0; i < g_fastled_values_size; ++i) {
+    g_fastled_values[i] = color;
   }    
 }
 
-int scale(int val, int in_low, int in_high, int out_low, int out_high) {
+int scaleRange(int val, int in_low, int in_high, int out_low, int out_high) {
   return (val - in_low) * (out_high - out_low) / (in_high - in_low) + out_low;
 }
 
 /**
  * Clamp a value between [low, high].
+ *
+ * @param val: the value to clamp.
+ * @param low: the lowest output, inclusive.
+ * @param high: the highest output, inclusive.
+ * @returns: the clamped value
  */
 int clamp(int val, int low, int high) {
   if (val > high) {
@@ -107,6 +121,8 @@ int clamp(int val, int low, int high) {
 /**
  * Format a binary MAC address as a hex string.
  *
+ * @param mac: the mac value to format.
+ * @returns: a string "XX:XX:XX:XX:XX:XX"
  */
 String macToStr(const uint8_t mac[6]) {
   String result;
@@ -118,88 +134,104 @@ String macToStr(const uint8_t mac[6]) {
   return result;
 }
 
+/**
+ * A network syncable millis() timer.
+ */
 class PhaseTimer {
   public:
     PhaseTimer(
         unsigned long offset,
         unsigned int dwell_weight,
         unsigned int update_weight) {
-      _offset = offset;
-      _dwell_weight = dwell_weight;
-      _update_weight = update_weight;
+      offset_ = offset;
+      dwell_weight_ = dwell_weight;
+      update_weight_ = update_weight;
     }
 
     unsigned long phase_time() {
-      return millis() + _offset;
+      return millis() + offset_;
     }
 
+    /**
+     * Update the local idea of time with a remote message.
+     *
+     * We do not model roundtrip timing here; just average
+     * phase time as it reaches us. The assumption is that
+     * all nodes are roughly the same 'distance' from the
+     * master.
+     */
     void update_phase(unsigned long remote_time) {
+      // This is what the offset of the remote time is wrt to our clock.
+      // This ignores transmission delays.
       unsigned long remote_offset = remote_time - millis();
       
-      if (!_initialized) {
-        _initialized = true;
-        _offset = remote_offset;
+      if (!initialized_) {
+        // The very first message is authoritative.
+        initialized_ = true;
+        offset_ = remote_offset;
 
       } else {
-        unsigned int denom = _dwell_weight + _update_weight;
+        // Subsequent messages are averaged.
+
+        unsigned int denom = dwell_weight_ + update_weight_;
 
         // (a * old + b * new) / (a + b)
         // (a * old / (a + b)) + (b * new / (a + b))
 
-        _offset = _dwell_weight * (_offset / denom) + _update_weight * (remote_offset / denom);
+        offset_ = dwell_weight_ * (offset_ / denom) + update_weight_ * (remote_offset / denom);
       }
     }
        
   private:
-    unsigned int _initialized = false;
-    unsigned int _dwell_weight;
-    unsigned int _update_weight;
-    unsigned long _offset;
+    unsigned int initialized_ = false;
+    unsigned int dwell_weight_;
+    unsigned int update_weight_;
+    unsigned long offset_;
 };
 
-PhaseTimer phase_timer(0, 4, 1);
+PhaseTimer g_phase_timer(0, 4, 1);
 
 
 class CycleTimer {
   public:
     CycleTimer(long period_millis, PhaseTimer *phase_timer) {
-      _period_millis = period_millis;
-      _phase_timer = phase_timer;
+      period_millis_ = period_millis;
+      phase_timer_ = phase_timer;
     }
 
     long value() {
-      return _phase_timer->phase_time() % _period_millis;
+      return phase_timer_->phase_time() % period_millis_;
     }
 
     uint8_t byteValue() {
-      return (256 * value()) / _period_millis;
+      return (256 * value()) / period_millis_;
     }
 
   private:
-    long _period_millis;
-    PhaseTimer *_phase_timer;
+    long period_millis_;
+    PhaseTimer *phase_timer_;
 };
 
 class PulseGenerator {
   public:
     PulseGenerator(long pulse_time, long delay_ms, PhaseTimer *phase_timer) {
-      _phase_timer = phase_timer;
-      _pulse_time = pulse_time;
-      _delay_ms = delay_ms;
-      _last_pulse = 0;
+      phase_timer_ = phase_timer;
+      pulse_time_ = pulse_time;
+      delay_ms_ = delay_ms;
+      last_pulse_ = 0;
     }
 
     bool pulse() {
       bool p = false;
-      unsigned long now = _phase_timer->phase_time();
+      unsigned long now = phase_timer_->phase_time();
 
-      if (_last_pulse + _pulse_time > now) {
+      if (last_pulse_ + pulse_time_ > now) {
         // The previous pulse is still active.
         p = true;
         
-      } else if (_last_pulse + _delay_ms < now) {
+      } else if (last_pulse_ + delay_ms_ < now) {
         // Start a new pulse.
-        _last_pulse = now;
+        last_pulse_ = now;
         p = true;
       }
 
@@ -207,30 +239,30 @@ class PulseGenerator {
     }
 
   private:
-    PhaseTimer *_phase_timer;
-    long _pulse_time;
-    long _delay_ms;
-    unsigned long _last_pulse;
+    PhaseTimer *phase_timer_;
+    long pulse_time_;
+    long delay_ms_;
+    unsigned long last_pulse_;
 };
 
 
 class PurrGenerator {
   public:
     PurrGenerator(PhaseTimer *phase_timer) {
-      _purr_h1 = new PulseGenerator(6, 150, phase_timer);
-      _purr_h2 = new PulseGenerator(6, 75, phase_timer);
-      _purr_h3 = new PulseGenerator(6, 37, phase_timer);
+      purr_h1_ = new PulseGenerator(6, 150, phase_timer);
+      purr_h2_ = new PulseGenerator(6, 75, phase_timer);
+      purr_h3_ = new PulseGenerator(6, 37, phase_timer);
     }
 
     bool pulse() {
-      return _purr_h1->pulse() | _purr_h2->pulse() | _purr_h3->pulse();
+      return purr_h1_->pulse() | purr_h2_->pulse() | purr_h3_->pulse();
     }
 
   private:
-   PulseGenerator *_purr_h1, *_purr_h2, *_purr_h3;
+   PulseGenerator *purr_h1_, *purr_h2_, *purr_h3_;
 };
 
-PurrGenerator purr(&phase_timer);
+PurrGenerator purr(&g_phase_timer);
 
 
 
@@ -241,92 +273,92 @@ class CellPower {
         uint8_t power_low,
         uint8_t power_high,
         uint8_t glitch) {
-      _phase_timer = phase_timer;
-      _heartbeat = new CycleTimer(6500, phase_timer);
-      _power_low = power_low;
-      _power_high = power_high;
-      _glitch = glitch;
+      phase_timer_ = phase_timer;
+      heartbeat_ = new CycleTimer(6500, phase_timer);
+      power_low_ = power_low;
+      power_high_ = power_high;
+      glitch_ = glitch;
     }
 
     void loop() {
-      int wave = scale(
-        cubicwave8(_heartbeat->byteValue()),
+      int wave = scaleRange(
+        cubicwave8(heartbeat_->byteValue()),
         0, 255,
-        _power_low, _power_high);
+        power_low_, power_high_);
 
-      wave += scale(
-        inoise8(_phase_timer->phase_time()),
+      wave += scaleRange(
+        inoise8(phase_timer_->phase_time()),
         0, 255,
-        -_glitch / 8, _glitch / 8);
+        -glitch_ / 8, glitch_ / 8);
 
-      _power = clamp(wave, 0, 255);
+      power_ = clamp(wave, 0, 255);
     }
 
     uint8_t power() {
-      return _power;
+      return power_;
     }
 
     void set_power_high(uint8_t power_high) {
-      _power_high = power_high;
+      power_high_ = power_high;
     }
 
     void set_power_low(uint8_t power_low) {
-      _power_low = power_low;
+      power_low_ = power_low;
     }
 
     uint8_t get_glitch() {
-      return _glitch;
+      return glitch_;
     }
 
     void update_glitch(uint8_t glitch) {
       if (random(10) == 0) {
-        _glitch = (((int) glitch) + ((int) _glitch)) / 2;
+        glitch_ = (((int) glitch) + ((int) glitch_)) / 2;
       }
     }
 
     void dump() {
       Serial.print("CellPower(");
-      Serial.print(_power_low);
+      Serial.print(power_low_);
       Serial.print(", ");
-      Serial.print(_power_high);
+      Serial.print(power_high_);
       Serial.print(")[");
-      Serial.print(_glitch);
+      Serial.print(glitch_);
       Serial.println("]");
     }
 
   private:
-    PhaseTimer *_phase_timer;
-    CycleTimer *_heartbeat;
+    PhaseTimer *phase_timer_;
+    CycleTimer *heartbeat_;
     
-    uint8_t _power_high;
-    uint8_t _power_low;
-    uint8_t _glitch;
-    uint8_t _power;
+    uint8_t power_high_;
+    uint8_t power_low_;
+    uint8_t glitch_;
+    uint8_t power_;
 };
 
-CellPower cell_power(&phase_timer, 0, 255, 255);
+CellPower g_cell_power(&g_phase_timer, 0, 255, 255);
 
 /**
 class VfdBank< {
   public:
     VfdBank(uint8_t num_tubes, uint8_t data_pin, uint8_t clock_pin, uint8_t latch_pin, uint8_t oe_pin) {
-      _num_tubes = num_tubes;
-      _data_pin = data_pin;
-      _clock_pin = clock_pin;
-      _latch_pin = latch_pin;
+      num_tubes_ = num_tubes;
+      data_pin_ = data_pin;
+      clock_pin_ = clock_pin;
+      latch_pin_ = latch_pin;
     }
 
   private:
-    uint8_t _num_tubes;
-    uint8_t _data_pin;
-    uint8_t _clock_pin;
-    uint8_t _latch_pin;
+    uint8_t num_tubes_;
+    uint8_t data_pin_;
+    uint8_t clock_pin_;
+    uint8_t latch_pin_;
 
     byte[] bank
 }
 */
 
-StaticJsonDocument<256> MQTT_RECEIPT_DOC;
+StaticJsonDocument<256> g_onMqttMessage_parse_doc;
 
 void onMqttMessage(char* topic, byte* payload, unsigned int payload_length) {
   Serial.print("onMqttMessage: ");
@@ -338,136 +370,53 @@ void onMqttMessage(char* topic, byte* payload, unsigned int payload_length) {
     Serial.println("Environment Update");
 
     // Zero-Copy Mode (modifies 'payload'):
-    if (deserializeJson(MQTT_RECEIPT_DOC, payload) == DeserializationError::Ok) {
+    if (deserializeJson(g_onMqttMessage_parse_doc, payload) == DeserializationError::Ok) {
 
-      if (MQTT_RECEIPT_DOC.containsKey(PHASE_KEY)) {
-        phase_timer.update_phase(MQTT_RECEIPT_DOC[PHASE_KEY]);
+      if (g_onMqttMessage_parse_doc.containsKey(PHASE_KEY)) {
+        g_phase_timer.update_phase(g_onMqttMessage_parse_doc[PHASE_KEY]);
         Serial.print("Phase: ");
-        Serial.println(phase_timer.phase_time());
+        Serial.println(g_phase_timer.phase_time());
       }
 
-      if (MQTT_RECEIPT_DOC.containsKey(POWER_LOW_KEY)) {
-        cell_power.set_power_low(MQTT_RECEIPT_DOC[POWER_LOW_KEY]);
+      if (g_onMqttMessage_parse_doc.containsKey(POWER_LOW_KEY)) {
+        g_cell_power.set_power_low(g_onMqttMessage_parse_doc[POWER_LOW_KEY]);
         Serial.println("Set power_low");
       }
       
-      if (MQTT_RECEIPT_DOC.containsKey(POWER_HIGH_KEY)) {
-        cell_power.set_power_high(MQTT_RECEIPT_DOC[POWER_HIGH_KEY]);
+      if (g_onMqttMessage_parse_doc.containsKey(POWER_HIGH_KEY)) {
+        g_cell_power.set_power_high(g_onMqttMessage_parse_doc[POWER_HIGH_KEY]);
         Serial.println("Set power_high");
       }
       
-      if (MQTT_RECEIPT_DOC.containsKey(GLITCH_KEY)) {
-        cell_power.update_glitch(MQTT_RECEIPT_DOC[GLITCH_KEY]);
+      if (g_onMqttMessage_parse_doc.containsKey(GLITCH_KEY)) {
+        g_cell_power.update_glitch(g_onMqttMessage_parse_doc[GLITCH_KEY]);
         Serial.println("Set glitch");
       }
 
-      cell_power.dump();
+      g_cell_power.dump();
       
     }
     
-  } else if (!strcmp(topic, (char*) AUTOMAT_CONTROL_TOPIC.c_str())) {
+  } else if (!strcmp(topic, (char*) g_cell_control_topic.c_str())) {
     // Control Message.
     Serial.println("Control Message");
     
   }
 }
 
-WiFiClient wifiClient;
-PubSubClient mqttClient(MQTT_BROKER, MQTT_PORT, onMqttMessage, wifiClient);
+WiFiClient g_wificlient;
+PubSubClient g_pubsubclient(MQTT_BROKER, MQTT_PORT, onMqttMessage, g_wificlient);
 
 bool buttonIsPressed() {
-  return (not digitalRead(BUTTON_PIN)) || (not digitalRead(CELL_RESET_PIN));
+  return (not digitalRead(FACE_BUTTON_PIN)) || (not digitalRead(REAR_BUTTON_PIN));
 }
 
 bool doorIsOpen() {
-  return analogRead(DOOR_PIN) > 800;
+  return analogRead(DOOR_SENSOR_PIN) > 800;
 }
 
 
-void setup() {
-  // Setup serial debugging.
-  Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY);
-  delay(10);
-  Serial.println("");
-  Serial.println("setup");
-
-  pinMode(BUTTON_LED_PIN, OUTPUT);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);  
- // pinMode(DOOR_PIN, INPUT_PULLUP);
-  pinMode(DOOR_LATCH_PIN, OUTPUT);
-  pinMode(CELL_RESET_PIN, INPUT);
-
-  pinMode(VFD_DATA, OUTPUT);
-  pinMode(VFD_CLOCK, OUTPUT);
-  pinMode(VFD_LATCH, OUTPUT);
-  pinMode(VFD_OE, OUTPUT);
-
-  pinMode(LED_DATA_PIN, OUTPUT);
-  pinMode(LED_CLOCK_PIN, OUTPUT);
-
-  FastLED.addLeds<
-    WS2801,
-    LED_DATA_PIN,
-    LED_CLOCK_PIN,
-    RGB>(
-      LED_STRAND,
-      LED_STRAND_SIZE);
-
-
-  // Setup WiFi.
-  Serial.print("Connecting to ");
-  Serial.println(WIFI_SSID);
-
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(100);
-    setLedColor(CRGB::Green);
-    FastLED.show();
-    digitalWrite(BUTTON_LED_PIN, LOW);
- 
-    delay(100);
-    setLedColor(CRGB::Red);
-    FastLED.show();
-    digitalWrite(BUTTON_LED_PIN, HIGH);
-      
-    Serial.print(".");
-  }
-
-  // WiFi Connected.
-  Serial.println("");
-  Serial.println("WiFi connected");  
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-
-  // Determine Cell Id.
-  {
-    uint8_t mac[6];
-    WiFi.macAddress(mac);
-    AUTOMAT_CELL_ID = "automat/cell/" + macToStr(mac);
-  }
-  Serial.print("AutomatCellId: ");
-  Serial.println(AUTOMAT_CELL_ID);
-
-  // Setup MQTT
-  Serial.println("Connecting to MQTT Server: ");
-  Serial.println(MQTT_BROKER);
-  if (!mqttClient.connect((char*) AUTOMAT_CELL_ID.c_str())) {
-    Serial.println("MQTT connect failed; Reseting ...");
-    abort();
-  }
-  Serial.print("Connected as: ");
-  Serial.println(AUTOMAT_CELL_ID);
-
-  Serial.print("Subscribing to environment updates: ");
-  Serial.println(AUTOMAT_ENVIRONMENT_TOPIC);
-  mqttClient.subscribe((char*) AUTOMAT_ENVIRONMENT_TOPIC.c_str(), 1);
-
-  AUTOMAT_CONTROL_TOPIC = AUTOMAT_CELL_ID + "/control";
-  Serial.print("Subscribing to environment updates: ");
-  Serial.println(AUTOMAT_CONTROL_TOPIC);
-  mqttClient.subscribe((char*) AUTOMAT_CONTROL_TOPIC.c_str(), 1);
-
-
+void initializeOtaSupport() {
   // ArduinoOTA
   // Port defaults to 8266
   // ArduinoOTA.setPort(8266);
@@ -498,33 +447,119 @@ void setup() {
   ArduinoOTA.begin();
 }
 
+void setup() {
+  // Setup serial debugging.
+  Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY);
+  delay(10);
+  Serial.println("");
+  Serial.println("setup");
+
+  pinMode(FACE_BUTTON_LED_PIN, OUTPUT);
+  pinMode(FACE_BUTTON_PIN, INPUT_PULLUP);  
+ // pinMode(DOOR_SENSOR_PIN, INPUT_PULLUP);
+  pinMode(LATCH_SOLENOID_PIN, OUTPUT);
+  pinMode(REAR_BUTTON_PIN, INPUT);
+
+  pinMode(VFD_DATA_PIN, OUTPUT);
+  pinMode(VFD_CLOCK_PIN, OUTPUT);
+  pinMode(VFD_LATCH_PIN, OUTPUT);
+  pinMode(VFD_OE_PIN, OUTPUT);
+
+  pinMode(CELL_LIGHTS_DATA_PIN, OUTPUT);
+  pinMode(CELL_LIGHTS_CLOCK_PIN, OUTPUT);
+
+  FastLED.addLeds<
+    WS2801,
+    CELL_LIGHTS_DATA_PIN,
+    CELL_LIGHTS_CLOCK_PIN,
+    RGB>(
+      g_fastled_values,
+      g_fastled_values_size);
+
+
+  // Setup WiFi.
+  Serial.print("Connecting to ");
+  Serial.println(WIFI_SSID);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(100);
+    setLedColor(CRGB::Green);
+    FastLED.show();
+    digitalWrite(FACE_BUTTON_LED_PIN, LOW);
+ 
+    delay(100);
+    setLedColor(CRGB::Red);
+    FastLED.show();
+    digitalWrite(FACE_BUTTON_LED_PIN, HIGH);
+      
+    Serial.print(".");
+  }
+
+  // WiFi Connected.
+  Serial.println("");
+  Serial.println("WiFi connected");  
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  // Determine Cell Id.
+  {
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    g_automat_cell_id = "automat/cell/" + macToStr(mac);
+  }
+  Serial.print("AutomatCellId: ");
+  Serial.println(g_automat_cell_id);
+
+  // Setup MQTT
+  Serial.println("Connecting to MQTT Server: ");
+  Serial.println(MQTT_BROKER);
+  if (!g_pubsubclient.connect((char*) g_automat_cell_id.c_str())) {
+    Serial.println("MQTT connect failed; Reseting ...");
+    abort();
+  }
+  Serial.print("Connected as: ");
+  Serial.println(g_automat_cell_id);
+
+  Serial.print("Subscribing to environment updates: ");
+  Serial.println(AUTOMAT_ENVIRONMENT_TOPIC);
+  g_pubsubclient.subscribe((char*) AUTOMAT_ENVIRONMENT_TOPIC.c_str(), 1);
+
+  g_cell_control_topic = g_automat_cell_id + "/control";
+  Serial.print("Subscribing to environment updates: ");
+  Serial.println(g_cell_control_topic);
+  g_pubsubclient.subscribe((char*) g_cell_control_topic.c_str(), 1);
+
+  initializeOtaSupport();
+}
+
 
 // Door Latch Notes:
 // https://www.vin.com/apputil/content/defaultadv1.aspx?id=5328490&pid=11349&print=1
 // 'purr' is roughly:
 //  if (millis() % 30 > 20) {
-//    digitalWrite(DOOR_LATCH_PIN, HIGH);
+//    digitalWrite(LATCH_SOLENOID_PIN, HIGH);
 //  } else {
-//    digitalWrite(DOOR_LATCH_PIN, LOW);
+//    digitalWrite(LATCH_SOLENOID_PIN, LOW);
 //  }
 
 void loop() {
   ArduinoOTA.handle();
-  mqttClient.loop();
+  g_pubsubclient.loop();
   
   // FIXME: debugging.
   if (buttonIsPressed()) {
-      digitalWrite(DOOR_LATCH_PIN, purr.pulse());
+      digitalWrite(LATCH_SOLENOID_PIN, purr.pulse());
   } else {
-    digitalWrite(DOOR_LATCH_PIN, LOW);
+    digitalWrite(LATCH_SOLENOID_PIN, LOW);
   }
 
   // POWER!
-  cell_power.loop();
-  FastLED.setBrightness(cell_power.power());
+  g_cell_power.loop();
+  FastLED.setBrightness(g_cell_power.power());
   // wemosd1's analogWrite is 0-1024 (not 0-255).
-  // VFD_OE is active-low.
-  analogWrite(VFD_OE, 1024 - (cell_power.power() * 4));
+  // VFD_OE_PIN is active-low.
+  analogWrite(VFD_OE_PIN, 1024 - (g_cell_power.power() * 4));
 
   setLedColor(AUTOMAT_GREEN);
     
