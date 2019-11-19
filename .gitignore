@@ -1,2 +1,5 @@
 /ve/
 /deps/
+
+*.bin
+*.elf
