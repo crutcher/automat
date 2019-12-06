@@ -150,6 +150,8 @@ void setup() {
   // No authentication by default
   // ArduinoOTA.setPassword((const char *)"123");
 
+  ArduinoOTA.setPassword((const char *) "automat/coin");
+
   ArduinoOTA.onStart([]() {
     Serial.println("Start");
   });
