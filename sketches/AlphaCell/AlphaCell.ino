@@ -6,6 +6,8 @@
 // g_global_variables
 // CONSTANT_VALUES
 
+#include "automat.h"
+
 
 #include <ArduinoOTA.h>
 
@@ -58,7 +60,7 @@ CRGB AUTOMAT_GREEN(22, 164, 40);
 
 
 #ifndef WIFI_SSID
-#define WIFI_SSID "bubbles"
+#define WIFI_SSID "Greebo"
 #endif
 
 #ifndef WIFI_PASSWORD
@@ -66,7 +68,7 @@ CRGB AUTOMAT_GREEN(22, 164, 40);
 #endif
 
 #ifndef MQTT_BROKER
-#define MQTT_BROKER "192.168.43.131"
+#define MQTT_BROKER "192.168.86.200"
 #endif
 
 #ifndef MQTT_PORT
