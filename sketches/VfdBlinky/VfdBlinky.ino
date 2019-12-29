@@ -267,7 +267,7 @@ class CellPower {
     uint8_t power_;
 };
 
-CellPower g_cell_power(&g_phase_timer, 125, 255, 30);
+CellPower g_cell_power(&g_phase_timer, 30, 255, 45);
 
 
 class VfdBank {
@@ -340,7 +340,7 @@ class VfdBank {
 
 };
 
-VfdBank vfd_bank(5, VFD_DATA_PIN, VFD_CLOCK_PIN, VFD_LATCH_PIN, VFD_OE_PIN);
+VfdBank vfd_bank(10, VFD_DATA_PIN, VFD_CLOCK_PIN, VFD_LATCH_PIN, VFD_OE_PIN);
 
 void setup() {
   // Setup serial debugging.
