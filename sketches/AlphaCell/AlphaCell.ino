@@ -352,7 +352,7 @@ class VfdBank {
 
     long ghost_counter_ = 0;
 
-    const long GHOST_RATIO = 30;
+    const long GHOST_RATIO = 20;
 
     VfdBank(
         uint8_t num_tubes,
@@ -371,15 +371,10 @@ class VfdBank {
     }
 
     void show() {
-      ++ghost_counter_;
-      ghost_counter_ %= GHOST_RATIO;
-
+      ghost_counter_ = (ghost_counter_ + 1) % GHOST_RATIO;
       bool ghost_active = ghost_counter_ == 0;
 
-      bool flicker_active = cubicwave8(inoise8(millis() / 2)) > 240;
-      if (flicker_active) {
-        flicker_active = random(4) >= 1;
-      }
+      bool flicker_active = random(255) < cubicwave8(inoise8(millis() / 2));
 
       digitalWrite(latch_pin_, LOW);
       for (int i = num_tubes_; i > 0; --i) {
@@ -669,9 +664,6 @@ const long DIGIT_DELAY = 1750;
 unsigned long lastFlickerDigitMillis = 0;
 const long FLICKER_DIGIT_DELAY = 600;
 
-byte garbage() {
-  return random(32, 128);
-}
 
 void loop() {
   ArduinoOTA.handle();
@@ -715,7 +707,8 @@ void loop() {
     for (int i = vfd_bank.num_tubes_; i > 1; --i) {
       vfd_bank.ghost_bank_[i-1] = vfd_bank.ghost_bank_[i-2];
     }
-    vfd_bank.ghost_bank_[0] = VfdAsciiGlyphMap[garbage()];
+    byte garbage = millis() % 255;
+    vfd_bank.ghost_bank_[0] = VfdAsciiGlyphMap[garbage];
   }
 
   vfd_bank.show();
