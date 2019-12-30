@@ -340,7 +340,7 @@ class CellPower {
     uint8_t power_;
 };
 
-CellPower g_cell_power(&g_phase_timer, 0, 255, 255);
+CellPower g_cell_power(&g_phase_timer, 0, 255, 60);
 
 
 class VfdBank {
@@ -349,6 +349,10 @@ class VfdBank {
     byte *ghost_bank_;
     byte *solid_bank_;
     byte *flicker_bank_;
+
+    long ghost_counter_ = 0;
+
+    const long GHOST_RATIO = 30;
 
     VfdBank(
         uint8_t num_tubes,
@@ -367,16 +371,30 @@ class VfdBank {
     }
 
     void show() {
+      ++ghost_counter_;
+      ghost_counter_ %= GHOST_RATIO;
+
+      bool ghost_active = ghost_counter_ == 0;
+
+      bool flicker_active = cubicwave8(inoise8(millis() / 2)) > 240;
+      if (flicker_active) {
+        flicker_active = random(4) >= 1;
+      }
+
       digitalWrite(latch_pin_, LOW);
       for (int i = num_tubes_; i > 0; --i) {
         int idx = i - 1;
 
         byte value = solid_bank_[idx];
 
-        if (random(100) > 95) {
+        if (ghost_active) {
           value |= ghost_bank_[idx];
         }
-        
+
+        if (flicker_active) {
+          value &= ~flicker_bank_[idx];
+        }
+
         shiftOut(data_pin_, clock_pin_, MSBFIRST, value);
       }
       digitalWrite(latch_pin_, HIGH);
@@ -399,6 +417,26 @@ class VfdBank {
         flicker_bank_[i] = 0;
       }
     }
+
+    void random_flicker(int seed, int count) {
+      clear_flicker();
+
+      const unsigned int p1 = 16807;
+      const unsigned int p2 = 0;
+      const unsigned int N = (1 << 31) - 1;
+      unsigned int z = (p1 * seed + p2) % N;
+
+      for (int i = 0; i < count; ++i) {
+        off_t bank = z % num_tubes_;
+        z = (p1 * z + p2) % N;
+
+        off_t bit = z % 8;
+        z = (p1 * z + p2) % N;
+
+        flicker_bank_[bank] |= 1 << bit;
+      }
+    }
+
 
     void clear() {
       clear_solid();
@@ -583,8 +621,8 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   // Determine Cell Id.
+  uint8_t mac[6];
   {
-    uint8_t mac[6];
     WiFi.macAddress(mac);
     g_automat_cell_id = "automat/cell/" + macToStr(mac);
   }
@@ -611,6 +649,8 @@ void setup() {
   g_pubsubclient.subscribe((char*) g_cell_control_topic.c_str(), 1);
 
   initializeOtaSupport();
+
+  vfd_bank.random_flicker(mac[0] * mac[1], 7);
 }
 
 
@@ -627,10 +667,10 @@ unsigned long lastDigitMillis = 0;
 const long DIGIT_DELAY = 1750;
 
 unsigned long lastFlickerDigitMillis = 0;
-const long FLICKER_DIGIT_DELAY = 800;
+const long FLICKER_DIGIT_DELAY = 600;
 
 byte garbage() {
-   return (millis() / 100) & 0xFF;
+  return random(32, 128);
 }
 
 void loop() {
@@ -655,27 +695,28 @@ void loop() {
   setLedColor(AUTOMAT_GREEN);
   FastLED.show();
 
-
   long now = millis();
-  if (now - lastDigitMillis > DIGIT_DELAY) {
-    lastDigitMillis = now;
-
-    // Right shift.
-    for (int i = vfd_bank.num_tubes_; i > 1; --i) {
-      vfd_bank.solid_bank_[i-1] = vfd_bank.solid_bank_[i-2];
-    }
-   vfd_bank.solid_bank_[0] = garbage();
- }
+// if (now - lastDigitMillis > DIGIT_DELAY) {
+//   lastDigitMillis = now;
+//
+//   // Right shift.
+//   for (int i = vfd_bank.num_tubes_; i > 1; --i) {
+//     vfd_bank.solid_bank_[i-1] = vfd_bank.solid_bank_[i-2];
+//   }
+//   vfd_bank.solid_bank_[0] = VfdAsciiGlyphMap[garbage()];
+// }
+  String content = "boobs";
+  vfd_render_ascii_string(vfd_bank.solid_bank_, content);
  
- if (now - lastDigitMillis > FLICKER_DIGIT_DELAY) {
+  if (now - lastFlickerDigitMillis > FLICKER_DIGIT_DELAY) {
     lastFlickerDigitMillis = now;
 
     // Right shift.
     for (int i = vfd_bank.num_tubes_; i > 1; --i) {
       vfd_bank.ghost_bank_[i-1] = vfd_bank.ghost_bank_[i-2];
     }
-   vfd_bank.ghost_bank_[0] = garbage();
- }
+    vfd_bank.ghost_bank_[0] = VfdAsciiGlyphMap[garbage()];
+  }
 
- vfd_bank.show();
+  vfd_bank.show();
 }
