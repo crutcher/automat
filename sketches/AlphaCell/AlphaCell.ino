@@ -540,6 +540,45 @@ void initializeOtaSupport() {
 
 VfdBank vfd_bank(5, VFD_DATA_PIN, VFD_CLOCK_PIN, VFD_LATCH_PIN, VFD_OE_PIN);
 
+void subscribe(String topic) {
+  Serial.print("Subscribing to MQTT Topic: ");
+  Serial.println(topic);
+  g_pubsubclient.subscribe((char*) topic.c_str(), 1);
+}
+
+void mqttLoop() {
+  static const int RECONNECT_DELAY_MS = 500;
+  static long last_reconnect_attempt = 0;
+
+  if (!g_pubsubclient.connected()) {
+    long now = millis();
+    if (last_reconnect_attempt + RECONNECT_DELAY_MS > now) {
+      return;
+    }
+    last_reconnect_attempt = now;
+  
+    // Setup MQTT
+    Serial.println("Connecting to MQTT Server: ");
+    Serial.println(MQTT_BROKER);
+    if (!g_pubsubclient.connect((char*) g_automat_cell_id.c_str())) {
+      Serial.println("MQTT connect failed; will retry ...");
+      return;
+    }
+
+    Serial.print("MQTT Connected as: ");
+    Serial.println(g_automat_cell_id);
+
+    subscribe(AUTOMAT_ENVIRONMENT_TOPIC);
+
+    g_cell_control_topic = g_automat_cell_id + "/#";
+    subscribe(g_cell_control_topic);
+  }
+
+  if (g_pubsubclient.connected()) {
+    g_pubsubclient.loop();
+  }
+}
+
 void setup() {
   // Setup serial debugging.
   Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY);
@@ -572,7 +611,6 @@ void setup() {
       g_fastled_values,
       g_fastled_values_size);
 
-
   // Setup WiFi.
   Serial.print("Connecting to ");
   Serial.println(WIFI_SSID);
@@ -582,6 +620,10 @@ void setup() {
   setLedColor(AUTOMAT_GREEN);
   FastLED.setBrightness(20);
   FastLED.show();
+
+  vfd_bank.clear();
+  vfd_render_ascii_string(vfd_bank.solid_bank_, "    ?");
+  vfd_bank.show();
 
   /* TODO(crutcher): Verify?
    * Explicitly set the ESP8266 to be a WiFi-client.
@@ -620,32 +662,17 @@ void setup() {
   {
     WiFi.macAddress(mac);
     g_automat_cell_id = "automat/cell/" + macToStr(mac);
+
+    vfd_bank.random_flicker(mac[0] * mac[1], 7);
   }
   Serial.print("AutomatCellId: ");
   Serial.println(g_automat_cell_id);
 
-  // Setup MQTT
-  Serial.println("Connecting to MQTT Server: ");
-  Serial.println(MQTT_BROKER);
-  if (!g_pubsubclient.connect((char*) g_automat_cell_id.c_str())) {
-    Serial.println("MQTT connect failed; Reseting ...");
-    abort();
-  }
-  Serial.print("Connected as: ");
-  Serial.println(g_automat_cell_id);
 
-  Serial.print("Subscribing to environment updates: ");
-  Serial.println(AUTOMAT_ENVIRONMENT_TOPIC);
-  g_pubsubclient.subscribe((char*) AUTOMAT_ENVIRONMENT_TOPIC.c_str(), 1);
-
-  g_cell_control_topic = g_automat_cell_id + "/control";
-  Serial.print("Subscribing to environment updates: ");
-  Serial.println(g_cell_control_topic);
-  g_pubsubclient.subscribe((char*) g_cell_control_topic.c_str(), 1);
+  vfd_render_ascii_string(vfd_bank.solid_bank_, "  ...");
+  vfd_bank.show();
 
   initializeOtaSupport();
-
-  vfd_bank.random_flicker(mac[0] * mac[1], 7);
 }
 
 
@@ -667,8 +694,12 @@ const long FLICKER_DIGIT_DELAY = 600;
 
 void loop() {
   ArduinoOTA.handle();
-  g_pubsubclient.loop();
+
+  mqttLoop();
   
+  // Simulate Power Supply!
+  g_cell_power.loop();
+
   // FIXME: debugging.
   if (buttonIsPressed()) {
     Serial.println("Button");
@@ -677,39 +708,26 @@ void loop() {
     digitalWrite(LATCH_SOLENOID_PIN, LOW);
   }
 
-  // POWER!
-  g_cell_power.loop();
-  FastLED.setBrightness(g_cell_power.power());
-  // wemosd1's analogWrite is 0-1024 (not 0-255).
-  // VFD_OE_PIN is active-low.
-  analogWrite(VFD_OE_PIN, 1024 - (g_cell_power.power() * 4));
-
   setLedColor(AUTOMAT_GREEN);
+  FastLED.setBrightness(g_cell_power.power());
   FastLED.show();
 
+  // Generate ghost bleed garbage.
   long now = millis();
-// if (now - lastDigitMillis > DIGIT_DELAY) {
-//   lastDigitMillis = now;
-//
-//   // Right shift.
-//   for (int i = vfd_bank.num_tubes_; i > 1; --i) {
-//     vfd_bank.solid_bank_[i-1] = vfd_bank.solid_bank_[i-2];
-//   }
-//   vfd_bank.solid_bank_[0] = VfdAsciiGlyphMap[garbage()];
-// }
-  String content = "boobs";
-  vfd_render_ascii_string(vfd_bank.solid_bank_, content);
- 
   if (now - lastFlickerDigitMillis > FLICKER_DIGIT_DELAY) {
     lastFlickerDigitMillis = now;
 
-    // Right shift.
+    // Right shift the existing content.
     for (int i = vfd_bank.num_tubes_; i > 1; --i) {
       vfd_bank.ghost_bank_[i-1] = vfd_bank.ghost_bank_[i-2];
     }
-    byte garbage = millis() % 255;
+    // Add a new random value.
+    byte garbage = random(32, 128);
     vfd_bank.ghost_bank_[0] = VfdAsciiGlyphMap[garbage];
   }
 
+  // wemosd1's analogWrite is 0-1024 (not 0-255).
+  // VFD_OE_PIN is active-low.
+  analogWrite(VFD_OE_PIN, 1024 - (g_cell_power.power() * 4));
   vfd_bank.show();
 }
