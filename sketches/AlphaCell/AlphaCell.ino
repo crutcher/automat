@@ -83,6 +83,10 @@ const String POWER_HIGH_KEY = "power_high";
 const String POWER_LOW_KEY = "power_low";
 const String GLITCH_KEY = "glitch";
 
+const String ASCII_KEY = "ascii";
+const String GLYPHS_KEY = "glyphs";
+const String OVERLAY_KEY = "overlay";
+
 const String MESSAGE_KEY = "message";
 const String OPEN_KEY = "open";
 
@@ -352,7 +356,7 @@ class VfdBank {
 
     long ghost_counter_ = 0;
 
-    const long GHOST_RATIO = 20;
+    const long GHOST_RATIO = 25;
 
     VfdBank(
         uint8_t num_tubes,
@@ -374,7 +378,7 @@ class VfdBank {
       ghost_counter_ = (ghost_counter_ + 1) % GHOST_RATIO;
       bool ghost_active = ghost_counter_ == 0;
 
-      bool flicker_active = random(255) < cubicwave8(inoise8(millis() / 2));
+      bool flicker_active = random(180, 256) < cubicwave8(inoise8(millis() / 2));
 
       digitalWrite(latch_pin_, LOW);
       for (int i = num_tubes_; i > 0; --i) {
@@ -446,17 +450,21 @@ class VfdBank {
 
 };
 
+VfdBank vfd_bank(5, VFD_DATA_PIN, VFD_CLOCK_PIN, VFD_LATCH_PIN, VFD_OE_PIN);
+
 
 StaticJsonDocument<256> g_onMqttMessage_parse_doc;
 
 void onMqttMessage(char* topic, byte* payload, unsigned int payload_length) {
   Serial.print("onMqttMessage: ");
   Serial.println(topic);
+
+  String topicStr(topic);
   
   // handle message arrived
-  if (!strcmp(topic, (char*) AUTOMAT_ENVIRONMENT_TOPIC.c_str())) {
+  if (topicStr.equals(AUTOMAT_ENVIRONMENT_TOPIC)) {
     // Environment Update.
-    Serial.println("Environment Update");
+    Serial.println("MQTT Environment Update");
 
     // Zero-Copy Mode (modifies 'payload'):
     if (deserializeJson(g_onMqttMessage_parse_doc, payload) == DeserializationError::Ok) {
@@ -485,12 +493,47 @@ void onMqttMessage(char* topic, byte* payload, unsigned int payload_length) {
       g_cell_power.dump();
       
     }
-    
-  } else if (!strcmp(topic, (char*) g_cell_control_topic.c_str())) {
-    // Control Message.
-    Serial.println("Control Message");
 
-    
+  } else if (topicStr.endsWith("/message")) {
+    Serial.println("MQTT Message Update");
+    // Zero-Copy Mode (modifies 'payload'):
+    if (deserializeJson(g_onMqttMessage_parse_doc, payload) == DeserializationError::Ok) {
+      vfd_bank.clear_solid();
+      
+      if (g_onMqttMessage_parse_doc.containsKey(ASCII_KEY)) {
+        String msg = g_onMqttMessage_parse_doc[ASCII_KEY];
+        Serial.print("Ascii: \"");
+        Serial.print(msg);
+        Serial.println("\"");
+
+        int k = min((unsigned int) vfd_bank.num_tubes_, msg.length());
+        for (int i = 0; i < k; ++i) {
+          vfd_bank.solid_bank_[i] |= vfd_render_ascii_glyph(msg[i]);
+        }
+      }
+
+      if (g_onMqttMessage_parse_doc.containsKey(OVERLAY_KEY)) {
+        String msg = g_onMqttMessage_parse_doc[OVERLAY_KEY];
+        Serial.print("Ascii Overlay: \"");
+        Serial.print(msg);
+        Serial.println("\"");
+
+        int k = min((unsigned int) vfd_bank.num_tubes_, msg.length());
+        for (int i = 0; i < k; ++i) {
+          vfd_bank.solid_bank_[i] |= vfd_render_ascii_glyph(msg[i]);
+        }
+      }
+
+      if (g_onMqttMessage_parse_doc.containsKey(GLYPHS_KEY)) {
+        Serial.println("Glyphs");
+        String msg = g_onMqttMessage_parse_doc[GLYPHS_KEY];
+
+        int k = min((unsigned int) vfd_bank.num_tubes_, msg.length());
+        for (int i = 0; i < k; ++i) {
+          vfd_bank.solid_bank_[i] |= msg[i];
+        }
+      }
+    }
   }
 }
 
@@ -504,41 +547,6 @@ bool buttonIsPressed() {
 bool doorIsOpen() {
   return analogRead(DOOR_SENSOR_PIN) > 800;
 }
-
-
-void initializeOtaSupport() {
-  // ArduinoOTA
-  // Port defaults to 8266
-  // ArduinoOTA.setPort(8266);
-
-  // Hostname defaults to esp8266-[ChipID]
-  // ArduinoOTA.setHostname("myesp8266");
-
-  // No authentication by default
-  // ArduinoOTA.setPassword((const char *)"123");
-  ArduinoOTA.setPassword((const char *) "automat/cell");
-
-  ArduinoOTA.onStart([]() {
-    Serial.println("Start");
-  });
-  ArduinoOTA.onEnd([]() {
-    Serial.println("\nEnd");
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
-  });
-  ArduinoOTA.begin();
-}
-
-VfdBank vfd_bank(5, VFD_DATA_PIN, VFD_CLOCK_PIN, VFD_LATCH_PIN, VFD_OE_PIN);
 
 void subscribe(String topic) {
   Serial.print("Subscribing to MQTT Topic: ");
@@ -570,13 +578,45 @@ void mqttLoop() {
 
     subscribe(AUTOMAT_ENVIRONMENT_TOPIC);
 
-    g_cell_control_topic = g_automat_cell_id + "/#";
-    subscribe(g_cell_control_topic);
+    subscribe("automat/cell/all/#");
+    subscribe(g_automat_cell_id + "/#");
   }
 
   if (g_pubsubclient.connected()) {
     g_pubsubclient.loop();
   }
+}
+
+void initializeOtaSupport() {
+  // ArduinoOTA
+  // Port defaults to 8266
+  // ArduinoOTA.setPort(8266);
+
+  // Hostname defaults to esp8266-[ChipID]
+  // ArduinoOTA.setHostname("myesp8266");
+
+  // No authentication by default
+  // ArduinoOTA.setPassword((const char *)"123");
+  ArduinoOTA.setPassword((const char *) "automat/cell");
+
+  ArduinoOTA.onStart([]() {
+    Serial.println("Start");
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nEnd");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+  ArduinoOTA.begin();
 }
 
 void setup() {
@@ -667,7 +707,6 @@ void setup() {
   }
   Serial.print("AutomatCellId: ");
   Serial.println(g_automat_cell_id);
-
 
   vfd_render_ascii_string(vfd_bank.solid_bank_, "  ...");
   vfd_bank.show();

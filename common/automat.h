@@ -164,31 +164,46 @@ const uint8_t VfdAsciiGlyphMap[] = {
   0b00000000, // 127  'DEL' NO DISPLAY
 };
 
+uint8_t vfd_render_glyph(
+    const uint8_t glyph_map[],
+    size_t glyph_map_size,
+    uint8_t unknown_glyph,
+    uint8_t source) {
+  uint8_t glyph = unknown_glyph;
+  if (source < glyph_map_size) {
+    glyph = glyph_map[source];
+  }
+  return glyph;
+}
+
 void vfd_render_glyphs(
-  const uint8_t glyph_map[],
-  size_t glyph_map_size,
-  uint8_t unknown_glyph,
-  uint8_t target[],
-  const uint8_t source[],
-  size_t length) {
-
+    const uint8_t glyph_map[],
+    size_t glyph_map_size,
+    uint8_t unknown_glyph,
+    uint8_t target[],
+    const uint8_t source[],
+    size_t length) {
   for (int i = 0; i < length; ++i) {
-    uint8_t s_value = source[i];
-
-    byte glyph = unknown_glyph;
-    if (s_value < glyph_map_size) {
-      glyph = glyph_map[s_value];
-    }
-
-    target[i] = glyph;
+    target[i] = vfd_render_glyph(
+      glyph_map,
+      glyph_map_size,
+      unknown_glyph,
+      source[i]);
   }
 }
 
-void vfd_render_ascii_buffer(
-  uint8_t target[],
-  const byte source[],
-  size_t length) {
+uint8_t vfd_render_ascii_glyph(uint8_t source) {
+  return vfd_render_glyph(
+    VfdAsciiGlyphMap,
+    sizeof(VfdAsciiGlyphMap),
+    VfdUnknownGlyph,
+    source);
+}
 
+void vfd_render_ascii_buffer(
+    uint8_t target[],
+    const byte source[],
+    size_t length) {
   vfd_render_glyphs(
     VfdAsciiGlyphMap,
     sizeof(VfdAsciiGlyphMap),
@@ -207,3 +222,4 @@ void vfd_render_ascii_string(
     (const byte *) source.c_str(),
     source.length());
 }
+
