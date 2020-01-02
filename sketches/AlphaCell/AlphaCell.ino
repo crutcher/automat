@@ -60,15 +60,15 @@ CRGB AUTOMAT_GREEN(22, 164, 40);
 
 
 #ifndef WIFI_SSID
-#define WIFI_SSID "_infinet"
+#define WIFI_SSID "Greebo"
 #endif
 
 #ifndef WIFI_PASSWORD
-#define WIFI_PASSWORD "spaceship"
+#define WIFI_PASSWORD "monkeyshine42"
 #endif
 
 #ifndef MQTT_BROKER
-#define MQTT_BROKER "10.1.1.216"
+#define MQTT_BROKER "192.168.86.200"
 #endif
 
 #ifndef MQTT_PORT
@@ -703,7 +703,11 @@ void setup() {
     WiFi.macAddress(mac);
     g_automat_cell_id = "automat/cell/" + macToStr(mac);
 
-    vfd_bank.random_flicker(mac[0] * mac[1], 7);
+    uint8_t seed = 42;
+    for (int i = 0; i < sizeof(mac); ++i) {
+      seed = seed ^ mac[i];
+    }
+    vfd_bank.random_flicker(seed, 7);
   }
   Serial.print("AutomatCellId: ");
   Serial.println(g_automat_cell_id);
