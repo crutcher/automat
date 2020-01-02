@@ -60,15 +60,15 @@ CRGB AUTOMAT_GREEN(22, 164, 40);
 
 
 #ifndef WIFI_SSID
-#define WIFI_SSID "Greebo"
+#define WIFI_SSID "_infinet"
 #endif
 
 #ifndef WIFI_PASSWORD
-#define WIFI_PASSWORD "monkeyshine42"
+#define WIFI_PASSWORD "spaceship"
 #endif
 
 #ifndef MQTT_BROKER
-#define MQTT_BROKER "192.168.86.200"
+#define MQTT_BROKER "10.1.1.216"
 #endif
 
 #ifndef MQTT_PORT
@@ -356,7 +356,7 @@ class VfdBank {
 
     long ghost_counter_ = 0;
 
-    const long GHOST_RATIO = 25;
+    const long GHOST_RATIO = 35;
 
     VfdBank(
         uint8_t num_tubes,
