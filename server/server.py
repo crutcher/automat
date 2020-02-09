@@ -3,7 +3,7 @@ import datetime
 
 import paho.mqtt.client as mqtt 
 
-phase_epoch = datetime.datetime.fromtimestamp(1577853689)
+phase_epoch = datetime.datetime.now()
 
 def phase_offset() -> datetime.timedelta:
   return (datetime.datetime.now() - phase_epoch)
