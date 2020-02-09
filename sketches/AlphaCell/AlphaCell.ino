@@ -60,15 +60,15 @@ CRGB AUTOMAT_GREEN(22, 164, 40);
 
 
 #ifndef WIFI_SSID
-#define WIFI_SSID "Greebo"
+#define WIFI_SSID "1337"
 #endif
 
 #ifndef WIFI_PASSWORD
-#define WIFI_PASSWORD "monkeyshine42"
+#define WIFI_PASSWORD "password"
 #endif
 
 #ifndef MQTT_BROKER
-#define MQTT_BROKER "192.168.86.200"
+#define MQTT_BROKER "10.1.1.198"
 #endif
 
 #ifndef MQTT_PORT
